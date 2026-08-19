@@ -1,15 +1,36 @@
 const express = require("express");
-const { pollWarehouse } = require("./poller");
-const { getStock } = require("./cache");
+const { updateStock, getStock } = require("./cache");
 
 const app = express();
 const PORT = 3000;
 
-// Run the first warehouse poll immediately
-pollWarehouse();
+app.use(express.json());
 
-// Poll the warehouse every 5 minutes
-setInterval(pollWarehouse, 5 * 60 * 1000);
+// Webhook endpoint
+app.post("/webhook/inventory", (req, res) => {
+  const { sku, stock } = req.body;
+
+  // Validate webhook payload
+  if (
+    typeof sku !== "string" ||
+    sku.trim() === "" ||
+    typeof stock !== "number" ||
+    stock < 0
+  ) {
+    return res.status(400).json({
+      error: "Invalid inventory update"
+    });
+  }
+
+  // Update the stock cache
+  updateStock(sku, stock);
+
+  res.status(200).json({
+    message: "Inventory updated",
+    sku: sku,
+    stock: stock
+  });
+});
 
 // Query endpoint
 app.get("/stock/:sku", (req, res) => {
