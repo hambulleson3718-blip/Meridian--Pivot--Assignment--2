@@ -1,111 +1,82 @@
- Scope Delta Analysis
+# Scope Delta — Solstice Events Async Check-In Pivot
 
-## Project
+## Original Scope
 
-Meridian Pivot — Northstar Retail Co. Inventory Sync Service
+The original kiosk requirement used a synchronous badge-printer REST API.
 
-## Pivot Summary
+The intended flow was:
 
-The original Day 3 specification required the service to poll the warehouse API every five minutes, cache inventory data, and expose a stock query endpoint.
+QR Scan → REST Printer API → Wait for Print Success → Show "Checked In"
 
-On Day 4, the client announced that the polling method would be discontinued within 48 hours. The implementation was therefore changed to a webhook-based inventory update model without extending the sprint deadline.
+The kiosk had to support at least three test attendees and prevent duplicate badge printing.
 
-## Original Architecture
+## Pivot Event
 
-Warehouse API → Poller → Stock Cache → Query Endpoint
+Solstice Events Co. announced that the synchronous badge-printer API was being deprecated with no deadline extension.
 
-## New Architecture
+The solution therefore had to move to an asynchronous architecture.
 
-Warehouse → Webhook Endpoint → Stock Cache → Query Endpoint
+## Dropped Scope
 
-## Scope Changes
+- Synchronous badge-printer REST API.
+- Waiting for an immediate printer response.
+- Showing "Checked In" immediately after the scan.
+- Original inventory polling implementation from the earlier prototype.
 
-### Dropped
+## Added Scope
 
-- Five-minute warehouse polling.
-- src/poller.js.
-- Automatic polling using setInterval().
+- Asynchronous print-request queue.
+- POST /checkin/:attendeeId endpoint.
+- PENDING attendee state.
+- POST /webhook/print-complete callback endpoint.
+- Webhook secret verification.
+- Print-job IDs.
+- Job-to-attendee matching.
+- Duplicate-scan protection.
+- Out-of-order webhook confirmation handling.
 
-### Modified
+## Modified Scope
 
-- src/server.js.
-- Inventory updates are now received through POST /webhook/inventory.
-- The cache is updated using updateStock().
+The attendee check-in workflow was changed from a synchronous process to an asynchronous process.
 
-### Added
+The new flow is:
 
-- POST /webhook/inventory.
-- JSON request parsing.
-- Webhook payload validation.
-- Rejection of invalid stock values.
+QR Scan → Duplicate Check → Queue Print Request → PENDING → Printer Completion Webhook → CHECKED_IN
 
-### Unchanged
+## Acceptance Criteria
 
-- src/cache.js.
-- Stock cache behavior.
-- GET /stock/:sku.
-- Stock availability calculation.
-- Inventory SKU structure.
+The implementation demonstrates:
 
-## Reprioritized Backlog
-
-| Priority | Item | Status |
-|---|---|---|
-| High | Replace polling with webhook updates | Completed |
-| High | Keep stock query endpoint working | Completed |
-| High | Remove obsolete polling code | Completed |
-| High | Validate webhook payloads | Completed |
-| Medium | Regression testing | Completed |
-| Medium | Document scope delta | In progress |
-| Low | Future persistent cache | Not part of current scope |
+1. At least three test attendees.
+2. Successful initial check-in requests.
+3. Pending status before printer confirmation.
+4. Duplicate scan rejection.
+5. Asynchronous queue processing.
+6. Successful webhook confirmation.
+7. Checked-in status only after successful confirmation.
+8. Protection against incorrect job-to-attendee matching.
+9. Handling of webhook confirmations arriving out of order.
 
 ## Trade-offs
 
-### Benefits
+The prototype uses an in-memory queue and attendee store rather than production infrastructure.
 
-- Removes dependence on periodic polling.
-- Inventory updates can be received immediately when an event is delivered.
-- Eliminates the five-minute polling interval.
-- Simplifies the active server flow.
+This keeps the demonstration simple while showing the required asynchronous architecture.
 
-### Costs
+## Production Gaps
 
-- The service now depends on the warehouse system delivering webhook events.
-- Webhook authentication/signature verification is not implemented in this prototype.
-- The cache remains in memory and is lost when the Node.js process stops.
-- Additional production reliability and security work would be required before deployment.
+Before production deployment, the service would require:
 
-## Regression Check
+- A production message broker such as RabbitMQ or a managed queue.
+- Persistent attendee storage.
+- Strong webhook authentication/signature verification.
+- Retry and dead-letter handling.
+- Idempotency persistence.
+- Monitoring and alerting.
+- Production deployment configuration.
 
-The existing GET /stock/:sku endpoint was tested after the webhook refactor.
+## Final Outcome
 
-Webhook update:
+The mandatory pivot was implemented without changing the core business requirement: an attendee receives a badge only after the printer confirms successful completion.
 
-NS-001 → 40 units
-
-Query result confirmed:
-
-- SKU: NS-001
-- Stock: 40
-- Available: true
-
-An out-of-stock update was also tested:
-
-NS-003 → 0 units
-
-The query endpoint returned:
-
-- Stock: 0
-- Available: false
-
-Invalid negative stock input was rejected with a 400 response.
-
-## Obsolete Code Removal
-
-The previous polling implementation in src/poller.js was removed.
-
-The server no longer starts an immediate warehouse poll and no longer schedules a five-minute polling interval.
-
-## Final Assessment
-
-The pivot was implemented without extending the original deadline. The new webhook-based approach meets the revised synchronization model while preserving the existing stock query interface.
+The implementation now supports asynchronous processing while maintaining duplicate-scan protection.
