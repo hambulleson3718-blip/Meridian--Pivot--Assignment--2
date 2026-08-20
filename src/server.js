@@ -1,227 +1,395 @@
 const http = require("node:http");
-const crypto = require("node:crypto");
+const { randomUUID } = require("node:crypto");
 
 const {
   getAttendee,
-  updateStatus,
-  assignJob
+  setPending,
+  setCheckedIn
 } = require("./attendees");
 
 const {
-  publishPrintRequest,
-  getNextPrintJob
+  addPrintJob,
+  getJob,
+  removeJob
 } = require("./queue");
 
 const PORT = process.env.PORT || 3000;
 const WEBHOOK_SECRET =
   process.env.WEBHOOK_SECRET || "solstice-demo-secret";
 
-function createJobId() {
-  return crypto.randomUUID();
-}
-
-function sendJson(res, statusCode, data) {
-  res.writeHead(statusCode, {
-    "Content-Type": "application/json"
-  });
-
-  res.end(JSON.stringify(data));
-}
-
-function readJsonBody(req, callback) {
-  let body = "";
-
-  req.on("data", function (chunk) {
-    body += chunk.toString();
-  });
-
-  req.on("end", function () {
-    try {
-      callback(null, JSON.parse(body));
-    } catch (error) {
-      callback(error);
-    }
-  });
-}
-
-const server = http.createServer(function (req, res) {
+const server = http.createServer((req, res) => {
   console.log("Request:", req.method, req.url);
 
-  // 1. ATTENDEE CHECK-IN
-  if (req.method === "POST" && req.url.startsWith("/checkin/")) {
-    const attendeeId = req.url.split("/")[2];
-    const attendee = getAttendee(attendeeId);
-
-    if (!attendee) {
-      return sendJson(res, 404, {
-        error: "Attendee not found"
-      });
-    }
-
-    // Prevent duplicate scans
-    if (attendee.status !== "NOT_CHECKED_IN") {
-      return sendJson(res, 409, {
-        error:
-          "Duplicate scan: attendee is already pending or checked in",
-        attendeeId: attendeeId,
-        status: attendee.status
-      });
-    }
-
-    const jobId = createJobId();
-
-    // Save the job against the attendee
-    assignJob(attendeeId, jobId);
-
-    // Mark attendee pending BEFORE publishing the print request
-    updateStatus(attendeeId, "PENDING");
-
-    publishPrintRequest({
-      jobId: jobId,
-      attendeeId: attendeeId
+  // --------------------------------------------------
+  // Homepage
+  // --------------------------------------------------
+  if (req.method === "GET" && req.url === "/") {
+    res.writeHead(200, {
+      "Content-Type": "application/json"
     });
 
-    return sendJson(res, 202, {
-      message: "Check-in accepted; badge printing is pending",
-      attendeeId: attendeeId,
-      status: "PENDING",
-      jobId: jobId
-    });
-  }
-
-  // 2. PROCESS NEXT QUEUED PRINT JOB
-  if (req.method === "POST" && req.url === "/queue/process") {
-    const job = getNextPrintJob();
-
-    if (!job) {
-      return sendJson(res, 404, {
-        error: "No print jobs waiting"
-      });
-    }
-
-    console.log(
-      "Processing print job " +
-        job.jobId +
-        " for " +
-        job.attendeeId
+    res.end(
+      JSON.stringify(
+        {
+          service: "Solstice Events Check-In Service",
+          status: "Live",
+          message: "Asynchronous badge printing service is running.",
+          endpoints: {
+            checkIn: "POST /checkin/:attendeeId",
+            processQueue: "POST /queue/process",
+            printWebhook: "POST /webhook/print-complete",
+            attendeeStatus: "GET /attendee/:attendeeId"
+          }
+        },
+        null,
+        2
+      )
     );
 
-    return sendJson(res, 202, {
-      message: "Print job handed to asynchronous worker",
-      jobId: job.jobId,
-      attendeeId: job.attendeeId
-    });
+    return;
   }
 
-  // 3. PRINTER VENDOR WEBHOOK
-  if (
-    req.method === "POST" &&
-    req.url === "/webhook/print-complete"
-  ) {
-    const receivedSecret = req.headers["x-webhook-secret"];
-
-    if (receivedSecret !== WEBHOOK_SECRET) {
-      return sendJson(res, 401, {
-        error: "Unauthorized: invalid webhook secret"
-      });
-    }
-
-    return readJsonBody(req, function (error, data) {
-      if (error) {
-        return sendJson(res, 400, {
-          error: "Invalid JSON payload"
-        });
-      }
-
-      const jobId = data.jobId;
-      const attendeeId = data.attendeeId;
-      const success = data.success;
-
-      if (!jobId || !attendeeId || success !== true) {
-        return sendJson(res, 400, {
-          error: "Invalid print completion payload"
-        });
-      }
-
-      const attendee = getAttendee(attendeeId);
-
-      if (!attendee) {
-        return sendJson(res, 404, {
-          error: "Attendee not found"
-        });
-      }
-
-      // Prevent duplicate webhook confirmations
-      if (attendee.status === "CHECKED_IN") {
-        return sendJson(res, 409, {
-          error: "Attendee is already checked in",
-          attendeeId: attendeeId,
-          status: attendee.status
-        });
-      }
-
-      // Webhook must match the job assigned to this attendee
-      if (attendee.jobId !== jobId) {
-        return sendJson(res, 409, {
-          error: "Job does not match attendee's active print job",
-          attendeeId: attendeeId,
-          expectedJobId: attendee.jobId,
-          receivedJobId: jobId
-        });
-      }
-
-      // Only a PENDING attendee can become CHECKED_IN
-      if (attendee.status !== "PENDING") {
-        return sendJson(res, 409, {
-          error: "Attendee is not waiting for print confirmation",
-          attendeeId: attendeeId,
-          status: attendee.status
-        });
-      }
-
-      // Successful printer confirmation
-      updateStatus(attendeeId, "CHECKED_IN");
-
-      return sendJson(res, 200, {
-        message: "Print completion received",
-        attendeeId: attendeeId,
-        status: "CHECKED_IN",
-        jobId: jobId
-      });
-    });
-  }
-
-  // 4. CHECK ATTENDEE STATUS
+  // --------------------------------------------------
+  // Get attendee status
+  // --------------------------------------------------
   if (
     req.method === "GET" &&
     req.url.startsWith("/attendee/")
   ) {
     const attendeeId = req.url.split("/")[2];
+
     const attendee = getAttendee(attendeeId);
 
     if (!attendee) {
-      return sendJson(res, 404, {
-        error: "Attendee not found"
+      res.writeHead(404, {
+        "Content-Type": "application/json"
       });
+
+      res.end(
+        JSON.stringify({
+          error: "Attendee not found"
+        })
+      );
+
+      return;
     }
 
-    return sendJson(res, 200, {
-      attendeeId: attendeeId,
-      name: attendee.name,
-      status: attendee.status,
-      jobId: attendee.jobId
+    res.writeHead(200, {
+      "Content-Type": "application/json"
     });
+
+    res.end(JSON.stringify(attendee));
+
+    return;
   }
 
-  // 5. UNKNOWN ROUTE
-  sendJson(res, 404, {
-    error: "Not Found"
+  // --------------------------------------------------
+  // Start check-in
+  // --------------------------------------------------
+  if (
+    req.method === "POST" &&
+    req.url.startsWith("/checkin/")
+  ) {
+    const attendeeId = req.url.split("/")[2];
+
+    const attendee = getAttendee(attendeeId);
+
+    if (!attendee) {
+      res.writeHead(404, {
+        "Content-Type": "application/json"
+      });
+
+      res.end(
+        JSON.stringify({
+          error: "Attendee not found"
+        })
+      );
+
+      return;
+    }
+
+    // Prevent duplicate scans
+    if (
+      attendee.status === "PENDING" ||
+      attendee.status === "CHECKED_IN"
+    ) {
+      res.writeHead(409, {
+        "Content-Type": "application/json"
+      });
+
+      res.end(
+        JSON.stringify({
+          error: "Attendee has already been checked in or is pending",
+          attendeeId: attendeeId,
+          status: attendee.status
+        })
+      );
+
+      return;
+    }
+
+    const jobId = randomUUID();
+
+    setPending(attendeeId, jobId);
+
+    addPrintJob({
+      jobId,
+      attendeeId
+    });
+
+    console.log(
+      `Print job ${jobId} created for ${attendeeId}`
+    );
+
+    res.writeHead(202, {
+      "Content-Type": "application/json"
+    });
+
+    res.end(
+      JSON.stringify({
+        message: "Check-in request accepted",
+        attendeeId,
+        jobId,
+        status: "PENDING"
+      })
+    );
+
+    return;
+  }
+
+  // --------------------------------------------------
+  // Process queue
+  // --------------------------------------------------
+  if (
+    req.method === "POST" &&
+    req.url === "/queue/process"
+  ) {
+    const job = removeJob();
+
+    if (!job) {
+      res.writeHead(200, {
+        "Content-Type": "application/json"
+      });
+
+      res.end(
+        JSON.stringify({
+          message: "No pending print jobs"
+        })
+      );
+
+      return;
+    }
+
+    console.log(
+      `Processing print job ${job.jobId} for ${job.attendeeId}`
+    );
+
+    res.writeHead(200, {
+      "Content-Type": "application/json"
+    });
+
+    res.end(
+      JSON.stringify({
+        message: "Print job processed",
+        jobId: job.jobId,
+        attendeeId: job.attendeeId
+      })
+    );
+
+    return;
+  }
+
+  // --------------------------------------------------
+  // Printer completion webhook
+  // --------------------------------------------------
+  if (
+    req.method === "POST" &&
+    req.url === "/webhook/print-complete"
+  ) {
+    const receivedSecret =
+      req.headers["x-webhook-secret"];
+
+    if (receivedSecret !== WEBHOOK_SECRET) {
+      console.log("Webhook verification failed");
+
+      res.writeHead(401, {
+        "Content-Type": "application/json"
+      });
+
+      res.end(
+        JSON.stringify({
+          error: "Unauthorized: invalid webhook secret"
+        })
+      );
+
+      return;
+    }
+
+    let body = "";
+
+    req.on("data", (chunk) => {
+      body += chunk.toString();
+    });
+
+    req.on("end", () => {
+      try {
+        const data = JSON.parse(body);
+
+        const {
+          jobId,
+          attendeeId,
+          success
+        } = data;
+
+        if (!jobId || !attendeeId || success !== true) {
+          res.writeHead(400, {
+            "Content-Type": "application/json"
+          });
+
+          res.end(
+            JSON.stringify({
+              error: "Invalid webhook payload"
+            })
+          );
+
+          return;
+        }
+
+        const job = getJob(jobId);
+
+        if (!job) {
+          res.writeHead(404, {
+            "Content-Type": "application/json"
+          });
+
+          res.end(
+            JSON.stringify({
+              error: "Print job not found"
+            })
+          );
+
+          return;
+        }
+
+        if (job.attendeeId !== attendeeId) {
+          res.writeHead(400, {
+            "Content-Type": "application/json"
+          });
+
+          res.end(
+            JSON.stringify({
+              error: "Job does not belong to attendee"
+            })
+          );
+
+          return;
+        }
+
+        const attendee = getAttendee(attendeeId);
+
+        if (!attendee) {
+          res.writeHead(404, {
+            "Content-Type": "application/json"
+          });
+
+          res.end(
+            JSON.stringify({
+              error: "Attendee not found"
+            })
+          );
+
+          return;
+        }
+
+        if (attendee.status === "CHECKED_IN") {
+          res.writeHead(200, {
+            "Content-Type": "application/json"
+          });
+
+          res.end(
+            JSON.stringify({
+              message: "Attendee already checked in",
+              attendeeId,
+              status: "CHECKED_IN"
+            })
+          );
+
+          return;
+        }
+
+        if (
+          attendee.status !== "PENDING" ||
+          attendee.jobId !== jobId
+        ) {
+          res.writeHead(409, {
+            "Content-Type": "application/json"
+          });
+
+          res.end(
+            JSON.stringify({
+              error: "Invalid or stale print job",
+              attendeeId,
+              status: attendee.status
+            })
+          );
+
+          return;
+        }
+
+        setCheckedIn(attendeeId);
+
+        console.log(
+          `Solstice check-in completed for ${attendeeId}`
+        );
+        res.writeHead(200, {
+          "Content-Type": "application/json"
+        });
+
+        res.end(
+          JSON.stringify({
+            message: "Print completion received",
+            attendeeId,
+            jobId,
+            status: "CHECKED_IN"
+          })
+        );
+      } catch (error) {
+        console.error(error);
+
+        res.writeHead(400, {
+          "Content-Type": "application/json"
+        });
+
+        res.end(
+          JSON.stringify({
+            error: "Invalid JSON payload"
+          })
+        );
+      }
+    });
+
+    return;
+  }
+
+  // --------------------------------------------------
+  // Unknown route
+  // --------------------------------------------------
+  res.writeHead(404, {
+    "Content-Type": "application/json"
   });
+
+  res.end(
+    JSON.stringify({
+      error: "Not Found"
+    })
+  );
 });
 
-server.listen(PORT, "0.0.0.0", function () {
+// --------------------------------------------------
+// Start server
+// --------------------------------------------------
+server.listen(PORT, "0.0.0.0", () => {
   console.log(
-    "Solstice check-in service running at http://localhost:" +
-      PORT
+    `Solstice check-in service running on port ${PORT}`
   );
 });
