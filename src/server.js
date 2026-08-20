@@ -219,7 +219,7 @@ const server = http.createServer(function (req, res) {
   });
 });
 
-server.listen(PORT, function () {
+server.listen(PORT, "0.0.0.0", function () {
   console.log(
     "Solstice check-in service running at http://localhost:" +
       PORT
