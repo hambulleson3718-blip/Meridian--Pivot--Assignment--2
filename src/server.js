@@ -1,4 +1,6 @@
 const http = require("node:http");
+const fs = require("node:fs");
+const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 
 const {
@@ -20,38 +22,75 @@ const WEBHOOK_SECRET =
 const server = http.createServer((req, res) => {
   console.log("Request:", req.method, req.url);
 
-  // --------------------------------------------------
-  // Homepage
-  // --------------------------------------------------
-  if (req.method === "GET" && req.url === "/") {
-    res.writeHead(200, {
-      "Content-Type": "application/json"
-    });
+  // ==========================================
+  // SERVE DEMO WEB APP
+  // ==========================================
 
-    res.end(
-      JSON.stringify(
-        {
-          service: "Solstice Events Check-In Service",
-          status: "Live",
-          message: "Asynchronous badge printing service is running.",
-          endpoints: {
-            checkIn: "POST /checkin/:attendeeId",
-            processQueue: "POST /queue/process",
-            printWebhook: "POST /webhook/print-complete",
-            attendeeStatus: "GET /attendee/:attendeeId"
-          }
-        },
-        null,
-        2
-      )
+  if (req.method === "GET" && req.url === "/") {
+    const filePath = path.join(
+      __dirname,
+      "../public/index.html"
     );
+
+    fs.readFile(filePath, (error, data) => {
+      if (error) {
+        console.error(error);
+
+        res.writeHead(500, {
+          "Content-Type": "text/plain"
+        });
+
+        res.end("Unable to load demo application");
+        return;
+      }
+
+      res.writeHead(200, {
+        "Content-Type": "text/html"
+      });
+
+      res.end(data);
+    });
 
     return;
   }
 
-  // --------------------------------------------------
-  // Get attendee status
-  // --------------------------------------------------
+  // ==========================================
+  // SERVE FRONTEND JAVASCRIPT
+  // ==========================================
+
+  if (req.method === "GET" && req.url === "/app.js") {
+    const filePath = path.join(
+      __dirname,
+      "../public/app.js"
+    );
+
+    fs.readFile(filePath, (error, data) => {
+      if (error) {
+        console.error(error);
+
+        res.writeHead(500, {
+          "Content-Type": "text/plain"
+        });
+
+        res.end("Unable to load application JavaScript");
+        return;
+      }
+
+      res.writeHead(200, {
+        "Content-Type": "application/javascript"
+      });
+
+      res.end(data);
+    });
+
+    return;
+  }
+
+  // ==========================================
+  // GET ATTENDEE STATUS
+  // GET /attendee/:attendeeId
+  // ==========================================
+
   if (
     req.method === "GET" &&
     req.url.startsWith("/attendee/")
@@ -83,9 +122,11 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // --------------------------------------------------
-  // Start check-in
-  // --------------------------------------------------
+  // ==========================================
+  // START CHECK-IN
+  // POST /checkin/:attendeeId
+  // ==========================================
+
   if (
     req.method === "POST" &&
     req.url.startsWith("/checkin/")
@@ -108,7 +149,7 @@ const server = http.createServer((req, res) => {
       return;
     }
 
-    // Prevent duplicate scans
+    // Prevent duplicate badge requests
     if (
       attendee.status === "PENDING" ||
       attendee.status === "CHECKED_IN"
@@ -119,7 +160,7 @@ const server = http.createServer((req, res) => {
 
       res.end(
         JSON.stringify({
-          error: "Attendee has already been checked in or is pending",
+          error: "Attendee is already pending or checked in",
           attendeeId: attendeeId,
           status: attendee.status
         })
@@ -128,10 +169,13 @@ const server = http.createServer((req, res) => {
       return;
     }
 
+    // Create a unique print job
     const jobId = randomUUID();
 
+    // Change attendee status to pending
     setPending(attendeeId, jobId);
 
+    // Add job to print queue
     addPrintJob({
       jobId,
       attendeeId
@@ -157,9 +201,11 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // --------------------------------------------------
-  // Process queue
-  // --------------------------------------------------
+  // ==========================================
+  // PROCESS PRINT QUEUE
+  // POST /queue/process
+  // ==========================================
+
   if (
     req.method === "POST" &&
     req.url === "/queue/process"
@@ -199,9 +245,11 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // --------------------------------------------------
-  // Printer completion webhook
-  // --------------------------------------------------
+  // ==========================================
+  // PRINTER COMPLETION WEBHOOK
+  // POST /webhook/print-complete
+  // ==========================================
+
   if (
     req.method === "POST" &&
     req.url === "/webhook/print-complete"
@@ -209,6 +257,7 @@ const server = http.createServer((req, res) => {
     const receivedSecret =
       req.headers["x-webhook-secret"];
 
+    // Verify webhook secret
     if (receivedSecret !== WEBHOOK_SECRET) {
       console.log("Webhook verification failed");
 
@@ -241,6 +290,7 @@ const server = http.createServer((req, res) => {
           success
         } = data;
 
+        // Validate payload
         if (!jobId || !attendeeId || success !== true) {
           res.writeHead(400, {
             "Content-Type": "application/json"
@@ -255,6 +305,7 @@ const server = http.createServer((req, res) => {
           return;
         }
 
+        // Find the print job
         const job = getJob(jobId);
 
         if (!job) {
@@ -271,6 +322,7 @@ const server = http.createServer((req, res) => {
           return;
         }
 
+        // Verify that the job belongs to the attendee
         if (job.attendeeId !== attendeeId) {
           res.writeHead(400, {
             "Content-Type": "application/json"
@@ -301,6 +353,7 @@ const server = http.createServer((req, res) => {
           return;
         }
 
+        // Safely handle duplicate webhook confirmations
         if (attendee.status === "CHECKED_IN") {
           res.writeHead(200, {
             "Content-Type": "application/json"
@@ -317,6 +370,7 @@ const server = http.createServer((req, res) => {
           return;
         }
 
+        // Reject stale or incorrect jobs
         if (
           attendee.status !== "PENDING" ||
           attendee.jobId !== jobId
@@ -336,18 +390,20 @@ const server = http.createServer((req, res) => {
           return;
         }
 
+        // Printer has confirmed successful completion
         setCheckedIn(attendeeId);
 
         console.log(
           `Solstice check-in completed for ${attendeeId}`
         );
+
         res.writeHead(200, {
           "Content-Type": "application/json"
         });
 
         res.end(
           JSON.stringify({
-            message: "Print completion received",
+            message: "Print completion received successfully",
             attendeeId,
             jobId,
             status: "CHECKED_IN"
@@ -371,9 +427,10 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // --------------------------------------------------
-  // Unknown route
-  // --------------------------------------------------
+  // ==========================================
+  // UNKNOWN ROUTE
+  // ==========================================
+
   res.writeHead(404, {
     "Content-Type": "application/json"
   });
@@ -385,9 +442,10 @@ const server = http.createServer((req, res) => {
   );
 });
 
-// --------------------------------------------------
-// Start server
-// --------------------------------------------------
+// ==========================================
+// START SERVER
+// ==========================================
+
 server.listen(PORT, "0.0.0.0", () => {
   console.log(
     `Solstice check-in service running on port ${PORT}`
