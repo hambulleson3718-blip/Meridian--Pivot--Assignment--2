@@ -1,21 +1,23 @@
 const printQueue = [];
+const completedJobs = new Map();
 
-function publishPrintRequest(job) {
+function addPrintJob(job) {
   printQueue.push(job);
 
-  console.log(
-    "Print request queued: " +
-      job.jobId +
-      " for " +
-      job.attendeeId
-  );
+  // Keep a record so the webhook can find the job
+  completedJobs.set(job.jobId, job);
 }
 
-function getNextPrintJob() {
-  return printQueue.shift() || null;
+function removeJob() {
+  return printQueue.shift();
+}
+
+function getJob(jobId) {
+  return completedJobs.get(jobId);
 }
 
 module.exports = {
-  publishPrintRequest,
-  getNextPrintJob
+  addPrintJob,
+  removeJob,
+  getJob
 };

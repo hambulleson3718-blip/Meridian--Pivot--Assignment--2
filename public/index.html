@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Solstice Events Check-In</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      background: #f4f6f8;
+      color: #222;
+    }
+
+    header {
+      background: #1f2937;
+      color: white;
+      padding: 25px;
+      text-align: center;
+    }
+
+    main {
+      max-width: 900px;
+      margin: 30px auto;
+      padding: 20px;
+    }
+
+    .intro {
+      text-align: center;
+      margin-bottom: 25px;
+    }
+
+    .attendees {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 20px;
+    }
+
+    .card {
+      background: white;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .status {
+      font-weight: bold;
+      padding: 8px;
+      border-radius: 5px;
+      margin: 15px 0;
+      background: #e5e7eb;
+    }
+
+    button {
+      width: 100%;
+      padding: 10px;
+      margin-top: 8px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 15px;
+      background: #2563eb;
+      color: white;
+    }
+
+    button:hover {
+      opacity: 0.9;
+    }
+
+    .queue-section {
+      margin-top: 30px;
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .message {
+      margin-top: 20px;
+      padding: 12px;
+      background: white;
+      border-radius: 5px;
+      min-height: 45px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <header>
+    <h1>Solstice Events Co.</h1>
+    <p>Async Conference Check-In & Badge Printing Demo</p>
+  </header>
+
+  <main>
+
+    <div class="intro">
+      <h2>Attendee Check-In Dashboard</h2>
+      <p>
+        Scan simulation → Pending → Print Queue → Webhook Confirmation → Checked In
+      </p>
+    </div>
+
+    <div class="attendees">
+
+      <div class="card">
+        <h3>ATT-001</h3>
+        <div class="status" id="status-ATT-001">
+          NOT_CHECKED_IN
+        </div>
+
+        <button onclick="checkIn('ATT-001')">
+          Check In
+        </button>
+
+        <button onclick="refreshStatus('ATT-001')">
+          Refresh Status
+        </button>
+      </div>
+
+      <div class="card">
+        <h3>ATT-002</h3>
+        <div class="status" id="status-ATT-002">
+          NOT_CHECKED_IN
+        </div>
+
+        <button onclick="checkIn('ATT-002')">
+          Check In
+        </button>
+
+        <button onclick="refreshStatus('ATT-002')">
+          Refresh Status
+        </button>
+      </div>
+
+      <div class="card">
+        <h3>ATT-003</h3>
+        <div class="status" id="status-ATT-003">
+          NOT_CHECKED_IN
+        </div>
+
+        <button onclick="checkIn('ATT-003')">
+          Check In
+        </button>
+
+        <button onclick="refreshStatus('ATT-003')">
+          Refresh Status
+        </button>
+      </div>
+
+    </div>
+
+    <div class="queue-section">
+      <h2>Printer Queue</h2>
+
+      <button onclick="processQueue()">
+        Process Next Print Job
+      </button>
+    </div>
+
+    <div class="message" id="message">
+      Ready for check-in.
+    </div>
+
+  </main>
+
+  <script src="/app.js"></script>
+
+</body>
+</html>

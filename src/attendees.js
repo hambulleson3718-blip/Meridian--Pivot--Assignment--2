@@ -1,41 +1,53 @@
 const attendees = {
   "ATT-001": {
-    name: "Alice Johnson",
+    attendeeId: "ATT-001",
+    name: "Attendee 001",
     status: "NOT_CHECKED_IN",
     jobId: null
   },
 
   "ATT-002": {
-    name: "Brian Otieno",
+    attendeeId: "ATT-002",
+    name: "Attendee 002",
     status: "NOT_CHECKED_IN",
     jobId: null
   },
 
   "ATT-003": {
-    name: "Carol Wanjiku",
+    attendeeId: "ATT-003",
+    name: "Attendee 003",
     status: "NOT_CHECKED_IN",
     jobId: null
   }
 };
 
 function getAttendee(attendeeId) {
-  return attendees[attendeeId] || null;
+  return attendees[attendeeId];
 }
 
-function updateStatus(attendeeId, status) {
-  if (attendees[attendeeId]) {
-    attendees[attendeeId].status = status;
+function setPending(attendeeId, jobId) {
+  if (!attendees[attendeeId]) {
+    return false;
   }
+
+  attendees[attendeeId].status = "PENDING";
+  attendees[attendeeId].jobId = jobId;
+
+  return true;
 }
 
-function assignJob(attendeeId, jobId) {
-  if (attendees[attendeeId]) {
-    attendees[attendeeId].jobId = jobId;
+function setCheckedIn(attendeeId) {
+  if (!attendees[attendeeId]) {
+    return false;
   }
+
+  attendees[attendeeId].status = "CHECKED_IN";
+
+  return true;
 }
 
 module.exports = {
   getAttendee,
-  updateStatus,
-  assignJob
+  setPending,
+  setCheckedIn
 };
